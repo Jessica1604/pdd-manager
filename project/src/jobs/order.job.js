@@ -1,33 +1,32 @@
 'use strict';
 
-/**
- * 订单同步定时任务：每 5 分钟拉取一次待发货订单
- */
-
 const cron = require('node-cron');
 const orderService = require('../services/order.service');
+const shopService = require('../services/shop.service');
 const feishu = require('../utils/feishu');
 const logger = require('../utils/logger');
 
-let failCount = 0;
-const MAX_FAIL = 3;
+const failCounts = {};
 
 function start() {
   cron.schedule('*/5 * * * *', async () => {
-    try {
-      const result = await orderService.syncOrders();
-      failCount = 0;
-      logger.info(`[定时任务] 订单同步完成: 新增 ${result.newCount} 条`);
-    } catch (err) {
-      failCount++;
-      logger.error(`[定时任务] 订单同步失败 (${failCount}/${MAX_FAIL}): ${err.message}`);
-      if (failCount >= MAX_FAIL) {
-        await feishu.sendMessage(`🚨 系统告警\n订单同步连续失败 ${MAX_FAIL} 次\n错误：${err.message}`);
-        failCount = 0;
+    const shops = shopService.listShops().filter(s => s.status === 'active');
+    for (const shop of shops) {
+      try {
+        const result = await orderService.syncOrders(shop.id);
+        failCounts[shop.id] = 0;
+        logger.info(`[定时任务] 店铺「${shop.name}」订单同步: 新增 ${result.newCount} 条`);
+      } catch (err) {
+        failCounts[shop.id] = (failCounts[shop.id] || 0) + 1;
+        logger.error(`[定时任务] 店铺「${shop.name}」同步失败(${failCounts[shop.id]}): ${err.message}`);
+        if (failCounts[shop.id] >= 3) {
+          await feishu.sendMessage(`🚨 告警：店铺「${shop.name}」订单同步连续失败 3 次\n${err.message}`);
+          failCounts[shop.id] = 0;
+        }
       }
     }
   });
-  logger.info('[定时任务] 订单同步已启动（每 5 分钟）');
+  logger.info('[定时任务] 订单同步已启动（每 5 分钟，覆盖所有活跃店铺）');
 }
 
 module.exports = { start };

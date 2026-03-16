@@ -1,120 +1,87 @@
 'use strict';
 
-/**
- * 订单服务：同步、发货、查询
- */
-
-const pdd = require('../api/pdd-client');
+const { forShop } = require('../api/pdd-client');
 const db = require('../utils/db');
 const feishu = require('../utils/feishu');
 const logger = require('../utils/logger');
 
-/**
- * 同步最新订单到本地数据库
- * 拉取待发货订单，新订单存库并发飞书通知
- */
-async function syncOrders() {
-  logger.info('[订单同步] 开始...');
-  try {
-    const res = await pdd.getOrderList({
-      orderStatus: 1, // 待发货
-      startTime: Math.floor(Date.now() / 1000) - 86400, // 最近 24h
-    });
+/** 同步指定店铺的待发货订单 */
+async function syncOrders(shopId) {
+  logger.info(`[订单同步] 店铺 ${shopId} 开始...`);
+  const api = forShop(shopId);
+  const res = await api.getOrderList({
+    order_status: 1,
+    start_time: Math.floor(Date.now() / 1000) - 86400,
+  });
+  const orders = (res.order_list_get_response || {}).order_list || [];
+  let newCount = 0;
 
-    const orders = res.order_list || [];
-    let newCount = 0;
-
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO orders
-        (order_sn, buyer_name, buyer_phone, buyer_address, goods_info, total_amount, status)
-      VALUES
-        (@order_sn, @buyer_name, @buyer_phone, @buyer_address, @goods_info, @total_amount, @status)
-    `);
-
-    for (const o of orders) {
-      const row = {
-        order_sn: o.order_sn,
-        buyer_name: o.receiver_name || '',
-        buyer_phone: o.receiver_phone || '',
-        buyer_address: `${o.province}${o.city}${o.town}${o.address}`,
-        goods_info: JSON.stringify(o.order_items || []),
-        total_amount: (o.order_amount || 0) / 100,
-        status: 'pending',
-      };
-      const result = insert.run(row);
-      if (result.changes > 0) {
-        newCount++;
-        await notifyNewOrder(row);
-      }
-    }
-
-    logger.info(`[订单同步] 完成，新增 ${newCount} 条`);
-    return { total: orders.length, newCount };
-  } catch (err) {
-    logger.error(`[订单同步] 失败: ${err.message}`);
-    throw err;
-  }
-}
-
-/**
- * 发货（圆通快递）
- * @param {string} orderSn
- * @param {string} trackingNumber
- */
-async function shipOrder(orderSn, trackingNumber) {
-  await pdd.shipOrder(orderSn, trackingNumber);
-
-  db.prepare(`
-    UPDATE orders SET status='shipped', tracking_number=?, updated_at=CURRENT_TIMESTAMP
-    WHERE order_sn=?
-  `).run(trackingNumber, orderSn);
-
-  logger.info(`[发货] ${orderSn} → 圆通 ${trackingNumber}`);
-}
-
-/**
- * 批量发货
- * @param {Array<{orderSn, trackingNumber}>} list
- */
-async function batchShip(list) {
-  const results = await pdd.batchShipOrders(list);
-
-  const update = db.prepare(`
-    UPDATE orders SET status='shipped', tracking_number=?, updated_at=CURRENT_TIMESTAMP
-    WHERE order_sn=?
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO orders
+      (shop_id, order_sn, buyer_name, buyer_phone, buyer_address, goods_info, total_amount, status)
+    VALUES (@shop_id,@order_sn,@buyer_name,@buyer_phone,@buyer_address,@goods_info,@total_amount,@status)
   `);
+
+  for (const o of orders) {
+    const row = {
+      shop_id: shopId,
+      order_sn: o.order_sn,
+      buyer_name: o.receiver_name || '',
+      buyer_phone: o.receiver_phone || '',
+      buyer_address: `${o.province || ''}${o.city || ''}${o.town || ''}${o.address || ''}`,
+      goods_info: JSON.stringify(o.order_items || []),
+      total_amount: (o.order_amount || 0) / 100,
+      status: 'pending',
+    };
+    if (insert.run(row).changes > 0) {
+      newCount++;
+      await notifyNewOrder(shopId, row);
+    }
+  }
+  logger.info(`[订单同步] 店铺 ${shopId} 完成，新增 ${newCount} 条`);
+  return { total: orders.length, newCount };
+}
+
+/** 发货（圆通） */
+async function shipOrder(shopId, orderSn, trackingNumber) {
+  await forShop(shopId).shipOrder(orderSn, trackingNumber);
+  db.prepare(`UPDATE orders SET status='shipped', tracking_number=?, updated_at=CURRENT_TIMESTAMP
+    WHERE shop_id=? AND order_sn=?`).run(trackingNumber, shopId, orderSn);
+  logger.info(`[发货] 店铺${shopId} ${orderSn} → 圆通 ${trackingNumber}`);
+}
+
+/** 批量发货 */
+async function batchShip(shopId, list) {
+  const results = await forShop(shopId).batchShipOrders(list);
+  const update = db.prepare(`UPDATE orders SET status='shipped', tracking_number=?, updated_at=CURRENT_TIMESTAMP
+    WHERE shop_id=? AND order_sn=?`);
   for (const r of results) {
-    if (r.success) update.run(
-      list.find(i => i.orderSn === r.orderSn)?.trackingNumber,
-      r.orderSn
-    );
+    if (r.success) {
+      const item = list.find(i => i.orderSn === r.orderSn);
+      if (item) update.run(item.trackingNumber, shopId, r.orderSn);
+    }
   }
   return results;
 }
 
-/**
- * 查询本地订单列表
- */
-function getLocalOrders({ status, limit = 50, offset = 0 } = {}) {
+/** 查询本地订单 */
+function getLocalOrders(shopId, { status, limit = 50, offset = 0 } = {}) {
   if (status) {
-    return db.prepare('SELECT * FROM orders WHERE status=? ORDER BY created_at DESC LIMIT ? OFFSET ?')
-      .all(status, limit, offset);
+    return db.prepare('SELECT * FROM orders WHERE shop_id=? AND status=? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+      .all(shopId, status, limit, offset);
   }
-  return db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ? OFFSET ?')
-    .all(limit, offset);
+  return db.prepare('SELECT * FROM orders WHERE shop_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    .all(shopId, limit, offset);
 }
 
-// ─── 飞书通知 ─────────────────────────────────────────────────────────────────
-
-async function notifyNewOrder(order) {
-  const text = [
-    '📦 新订单提醒',
+async function notifyNewOrder(shopId, order) {
+  await feishu.sendMessage([
+    `📦 新订单提醒（店铺ID: ${shopId}）`,
     `订单号：${order.order_sn}`,
     `金额：¥${order.total_amount}`,
     `买家：${order.buyer_name}`,
     `地址：${order.buyer_address}`,
-  ].join('\n');
-  await feishu.sendMessage(text);
+  ].join('\n'));
 }
 
 module.exports = { syncOrders, shipOrder, batchShip, getLocalOrders };
