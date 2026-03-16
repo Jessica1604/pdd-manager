@@ -54,7 +54,7 @@ async function syncGoods() {
 async function checkStockWarning() {
   const threshold = config.stock.warningThreshold;
   const lowStock = db.prepare(
-    'SELECT * FROM goods WHERE stock <= ? AND status="on"'
+    "SELECT * FROM goods WHERE stock <= ? AND status='on'"
   ).all(threshold);
 
   if (lowStock.length === 0) return;
