@@ -42,8 +42,7 @@ async function checkStockWarning(shopId) {
   ).all(shopId, threshold);
 
   if (!lowStock.length) return [];
-  const lines = lowStock.map(g => `- ${g.goods_name}（库存：${g.stock} 件）`).join('\n');
-  await feishu.sendMessage(`⚠️ 库存预警（店铺ID: ${shopId}）\n低于 ${threshold} 件：\n${lines}`);
+  await feishu.notifyStockWarning(`店铺 #${shopId}`, lowStock);
   return lowStock;
 }
 

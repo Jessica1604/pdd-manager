@@ -12,8 +12,12 @@ require('./utils/db'); // 初始化数据库
 const app = express();
 app.use(express.json());
 
-// API 路由
-app.use('/api', require('./routes/api'));
+// 登录接口（无需鉴权）
+app.use('/auth', require('./routes/auth'));
+
+// 业务 API（需要 JWT 鉴权）
+const auth = require('./middleware/auth');
+app.use('/api', auth, require('./routes/api'));
 
 // 启动定时任务
 require('./jobs/order.job').start();

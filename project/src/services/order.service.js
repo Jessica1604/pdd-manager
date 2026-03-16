@@ -75,13 +75,9 @@ function getLocalOrders(shopId, { status, limit = 50, offset = 0 } = {}) {
 }
 
 async function notifyNewOrder(shopId, order) {
-  await feishu.sendMessage([
-    `📦 新订单提醒（店铺ID: ${shopId}）`,
-    `订单号：${order.order_sn}`,
-    `金额：¥${order.total_amount}`,
-    `买家：${order.buyer_name}`,
-    `地址：${order.buyer_address}`,
-  ].join('\n'));
+  const db = require('./shop.service');
+  const shopName = `店铺 #${shopId}`;
+  await feishu.notifyNewOrder(shopName, order);
 }
 
 module.exports = { syncOrders, shipOrder, batchShip, getLocalOrders };
