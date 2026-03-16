@@ -1,0 +1,5 @@
+node_modules/
+.env
+data/pdd.db
+logs/
+frontend/dist/
