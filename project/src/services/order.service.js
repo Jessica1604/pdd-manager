@@ -38,7 +38,7 @@ async function syncOrders(shopId) {
       await notifyNewOrder(shopId, row);
     }
   }
-  logger.info(`[订单同步] 店铺 ${shopId} 完成，新增 ${newCount} 条`);
+  logger.op('订单同步', `店铺 ${shopId} 完成，新增 ${newCount} 条`);
   return { total: orders.length, newCount };
 }
 
@@ -47,7 +47,7 @@ async function shipOrder(shopId, orderSn, trackingNumber) {
   await forShop(shopId).shipOrder(orderSn, trackingNumber);
   db.prepare(`UPDATE orders SET status='shipped', tracking_number=?, updated_at=CURRENT_TIMESTAMP
     WHERE shop_id=? AND order_sn=?`).run(trackingNumber, shopId, orderSn);
-  logger.info(`[发货] 店铺${shopId} ${orderSn} → 圆通 ${trackingNumber}`);
+  logger.op('手动发货', `店铺${shopId} 订单${orderSn} → 圆通 ${trackingNumber}`);
 }
 
 /** 批量发货 */
@@ -64,14 +64,27 @@ async function batchShip(shopId, list) {
   return results;
 }
 
-/** 查询本地订单 */
-function getLocalOrders(shopId, { status, limit = 50, offset = 0 } = {}) {
-  if (status) {
-    return db.prepare('SELECT * FROM orders WHERE shop_id=? AND status=? ORDER BY created_at DESC LIMIT ? OFFSET ?')
-      .all(shopId, status, limit, offset);
-  }
-  return db.prepare('SELECT * FROM orders WHERE shop_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?')
-    .all(shopId, limit, offset);
+/** 查询本地订单（支持分页、状态、时间范围筛选） */
+function getLocalOrders(shopId, { status, startTime, endTime, page = 1, pageSize = 20 } = {}) {
+  const limit = +pageSize
+  const offset = (+page - 1) * limit
+  const conditions = ['shop_id=?']
+  const params = [shopId]
+
+  if (status) { conditions.push('status=?'); params.push(status) }
+  if (startTime) { conditions.push("DATE(created_at) >= ?"); params.push(startTime) }
+  if (endTime) { conditions.push("DATE(created_at) <= ?"); params.push(endTime) }
+
+  const where = conditions.join(' AND ')
+
+  const total = db.prepare(`SELECT COUNT(*) AS cnt FROM orders WHERE ${where}`)
+    .get(...params).cnt
+
+  const list = db.prepare(
+    `SELECT * FROM orders WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset)
+
+  return { list, total, page: +page, pageSize: limit }
 }
 
 async function notifyNewOrder(shopId, order) {

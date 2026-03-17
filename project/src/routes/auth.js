@@ -37,7 +37,15 @@ router.post('/login', async (req, res) => {
     { expiresIn: config.jwt.expiresIn }
   );
 
-  res.json({ code: 0, data: { token, expiresIn: config.jwt.expiresIn }, message: '登录成功' });
+  res.json({
+    code: 0,
+    data: {
+      token,
+      expiresIn: config.jwt.expiresIn,
+      user: { username }
+    },
+    message: '登录成功'
+  });
 });
 
 module.exports = router;

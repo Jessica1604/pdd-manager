@@ -6,6 +6,7 @@ const orderService = require('../services/order.service');
 const goodsService = require('../services/goods.service');
 const shopService = require('../services/shop.service');
 const feishu = require('../utils/feishu');
+const asyncHandler = require('../middleware/asyncHandler');
 
 // ─── 店铺管理 ─────────────────────────────────────────────────────────────────
 
@@ -41,78 +42,70 @@ router.delete('/shops/:shopId', (req, res) => {
 });
 
 // 验证店铺凭证
-router.post('/shops/:shopId/verify', async (req, res) => {
+router.post('/shops/:shopId/verify', asyncHandler(async (req, res) => {
   const result = await shopService.verifyShop(+req.params.shopId);
   res.json({ code: result.valid ? 0 : 1, data: result });
-});
+}));
 
 // ─── 订单（需传 shopId） ──────────────────────────────────────────────────────
 
-router.post('/sync/orders', async (req, res) => {
+router.post('/sync/orders', asyncHandler(async (req, res) => {
   const { shopId } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    const result = await orderService.syncOrders(+shopId);
-    res.json({ code: 0, data: result });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  const result = await orderService.syncOrders(+shopId);
+  res.json({ code: 0, data: result });
+}));
 
 router.get('/orders', (req, res) => {
-  const { shopId, status, limit, offset } = req.query;
+  const { shopId, status, startTime, endTime, page = 1, pageSize = 20 } = req.query;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  res.json({ code: 0, data: orderService.getLocalOrders(+shopId, { status, limit: +limit || 50, offset: +offset || 0 }) });
+  const data = orderService.getLocalOrders(+shopId, { status, startTime, endTime, page: +page, pageSize: +pageSize });
+  res.json({ code: 0, data });
 });
 
-router.post('/orders/:orderSn/ship', async (req, res) => {
+router.post('/orders/:orderSn/ship', asyncHandler(async (req, res) => {
   const { shopId, trackingNumber } = req.body;
   if (!shopId || !trackingNumber) return res.json({ code: 1, message: 'shopId 和 trackingNumber 必填' });
-  try {
-    await orderService.shipOrder(+shopId, req.params.orderSn, trackingNumber);
-    res.json({ code: 0, message: '发货成功' });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  await orderService.shipOrder(+shopId, req.params.orderSn, trackingNumber);
+  res.json({ code: 0, message: '发货成功' });
+}));
 
-router.post('/orders/batch-ship', async (req, res) => {
+router.post('/orders/batch-ship', asyncHandler(async (req, res) => {
   const { shopId, list } = req.body;
   if (!shopId || !Array.isArray(list)) return res.json({ code: 1, message: '参数错误' });
-  try {
-    res.json({ code: 0, data: await orderService.batchShip(+shopId, list) });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  res.json({ code: 0, data: await orderService.batchShip(+shopId, list) });
+}));
 
 // ─── 商品（需传 shopId） ──────────────────────────────────────────────────────
 
-router.post('/sync/goods', async (req, res) => {
+router.post('/sync/goods', asyncHandler(async (req, res) => {
   const { shopId } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    const count = await goodsService.syncGoods(+shopId);
-    res.json({ code: 0, data: { count } });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  const count = await goodsService.syncGoods(+shopId);
+  res.json({ code: 0, data: { count } });
+}));
 
 router.get('/goods', (req, res) => {
-  const { shopId, status, limit, offset } = req.query;
+  const { shopId, status, keyword, page = 1, pageSize = 20 } = req.query;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  res.json({ code: 0, data: goodsService.getLocalGoods(+shopId, { status, limit: +limit || 100, offset: +offset || 0 }) });
+  const limit = +pageSize;
+  const offset = (+page - 1) * limit;
+  const { list, total } = goodsService.getLocalGoods(+shopId, { status, keyword, limit, offset });
+  res.json({ code: 0, data: { list, total, page: +page, pageSize: limit } });
 });
 
-router.put('/goods/:goodsId', async (req, res) => {
+router.put('/goods/:goodsId', asyncHandler(async (req, res) => {
   const { shopId, ...data } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    await goodsService.updateGoods(+shopId, req.params.goodsId, data);
-    res.json({ code: 0, message: '更新成功' });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  await goodsService.updateGoods(+shopId, req.params.goodsId, data);
+  res.json({ code: 0, message: '更新成功' });
+}));
 
-router.post('/goods/batch-status', async (req, res) => {
+router.post('/goods/batch-status', asyncHandler(async (req, res) => {
   const { shopId, goodsIds, onSale } = req.body;
   if (!shopId || !Array.isArray(goodsIds)) return res.json({ code: 1, message: '参数错误' });
-  try {
-    res.json({ code: 0, data: await goodsService.batchUpdateStatus(+shopId, goodsIds, onSale) });
-  } catch (err) { res.json({ code: 1, message: err.message }); }
-});
+  res.json({ code: 0, data: await goodsService.batchUpdateStatus(+shopId, goodsIds, onSale) });
+}));
 
 // ─── 报表 ─────────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 const cron = require('node-cron');
 const orderService = require('../services/order.service');
 const shopService = require('../services/shop.service');
-const feishu = require('../utils/feishu');
+const monitor = require('../utils/monitor');
 const logger = require('../utils/logger');
 
 const failCounts = {};
@@ -20,8 +20,7 @@ function start() {
         failCounts[shop.id] = (failCounts[shop.id] || 0) + 1;
         logger.error(`[定时任务] 店铺「${shop.name}」同步失败(${failCounts[shop.id]}): ${err.message}`);
         if (failCounts[shop.id] >= 3) {
-          await feishu.sendMessage(`🚨 告警：店铺「${shop.name}」订单同步连续失败 3 次\n${err.message}`);
-          failCounts[shop.id] = 0;
+          await monitor.jobFail('订单同步', shop.name, err.message, failCounts[shop.id]);
         }
       }
     }

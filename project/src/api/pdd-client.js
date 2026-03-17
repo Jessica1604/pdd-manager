@@ -9,6 +9,12 @@ const axios = require('axios');
 const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../utils/logger');
+// 懒加载 monitor，避免循环依赖
+let monitor = null;
+function getMonitor() {
+  if (!monitor) monitor = require('../utils/monitor');
+  return monitor;
+}
 const db = require('../utils/db');
 
 // 每个店铺独立的限流队列
@@ -76,6 +82,10 @@ async function call(type, params = {}, shopId = null, retry = 3) {
         return call(type, params, shopId, retry - 1);
       }
       logger.error(msg);
+      // 非限流的业务错误触发告警
+      if (error_code !== 10038) {
+        getMonitor().apiError('拼多多API', `${type}: ${error_msg}`, error_code).catch(() => {});
+      }
       throw Object.assign(new Error(msg), { code: error_code });
     }
     return data;

@@ -1,16 +1,12 @@
 'use strict';
 
-/**
- * 报表定时任务
- * - 每天 00:00 生成昨日日报（所有活跃店铺）
- * - 每周一 09:00 生成上周周报
- */
-
 const cron = require('node-cron');
 const analyticsService = require('../services/analytics.service');
 const shopService = require('../services/shop.service');
-const feishu = require('../utils/feishu');
+const monitor = require('../utils/monitor');
 const logger = require('../utils/logger');
+
+const failCounts = {};
 
 function start() {
   // 每日日报：00:00
@@ -20,9 +16,11 @@ function start() {
     for (const shop of shops) {
       try {
         await analyticsService.sendDailyReport(shop.id, shop.name);
+        failCounts[`daily_${shop.id}`] = 0;
       } catch (err) {
+        failCounts[`daily_${shop.id}`] = (failCounts[`daily_${shop.id}`] || 0) + 1;
         logger.error(`[日报] 店铺「${shop.name}」失败: ${err.message}`);
-        await feishu.notifyAlert('日报生成失败', `店铺「${shop.name}」: ${err.message}`);
+        await monitor.jobFail('日报生成', shop.name, err.message, failCounts[`daily_${shop.id}`]);
       }
     }
   });
@@ -34,8 +32,11 @@ function start() {
     for (const shop of shops) {
       try {
         await analyticsService.sendWeeklyReport(shop.id, shop.name);
+        failCounts[`weekly_${shop.id}`] = 0;
       } catch (err) {
+        failCounts[`weekly_${shop.id}`] = (failCounts[`weekly_${shop.id}`] || 0) + 1;
         logger.error(`[周报] 店铺「${shop.name}」失败: ${err.message}`);
+        await monitor.jobFail('周报生成', shop.name, err.message, failCounts[`weekly_${shop.id}`]);
       }
     }
   });

@@ -30,7 +30,7 @@ async function syncGoods(shopId) {
       status: g.is_onsale ? 'on' : 'off',
     });
   }
-  logger.info(`[商品同步] 店铺 ${shopId} 完成，共 ${goods.length} 件`);
+  logger.op('商品同步', `店铺 ${shopId} 完成，共 ${goods.length} 件`);
   return goods.length;
 }
 
@@ -46,14 +46,24 @@ async function checkStockWarning(shopId) {
   return lowStock;
 }
 
-/** 查询本地商品 */
-function getLocalGoods(shopId, { status, limit = 100, offset = 0 } = {}) {
-  if (status) {
-    return db.prepare("SELECT * FROM goods WHERE shop_id=? AND status=? ORDER BY updated_at DESC LIMIT ? OFFSET ?")
-      .all(shopId, status, limit, offset);
-  }
-  return db.prepare('SELECT * FROM goods WHERE shop_id=? ORDER BY updated_at DESC LIMIT ? OFFSET ?')
-    .all(shopId, limit, offset);
+/** 查询本地商品（支持分页、状态筛选、关键词搜索） */
+function getLocalGoods(shopId, { status, keyword, limit = 20, offset = 0 } = {}) {
+  const conditions = ['shop_id=?'];
+  const params = [shopId];
+
+  if (status) { conditions.push('status=?'); params.push(status); }
+  if (keyword) { conditions.push('goods_name LIKE ?'); params.push(`%${keyword}%`); }
+
+  const where = conditions.join(' AND ');
+
+  const total = db.prepare(`SELECT COUNT(*) AS cnt FROM goods WHERE ${where}`)
+    .get(...params).cnt;
+
+  const list = db.prepare(
+    `SELECT * FROM goods WHERE ${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
+
+  return { list, total };
 }
 
 /** 更新商品 */

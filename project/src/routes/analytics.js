@@ -6,24 +6,21 @@ const customerService = require('../services/customer.service');
 const analyticsService = require('../services/analytics.service');
 const deepseek = require('../utils/deepseek');
 const shopService = require('../services/shop.service');
+const asyncHandler = require('../middleware/asyncHandler');
 
 // ═══════════════════════════════════════════════════════
 // 客服管理
 // ═══════════════════════════════════════════════════════
 
 // 处理客服消息（核心接口）
-router.post('/customer/message', async (req, res) => {
+router.post('/customer/message', asyncHandler(async (req, res) => {
   const { shopId, userId, message, orderInfo } = req.body;
   if (!shopId || !userId || !message) {
     return res.json({ code: 1, message: 'shopId / userId / message 必填' });
   }
-  try {
-    const result = await customerService.handleMessage(+shopId, userId, message, { orderInfo });
-    res.json({ code: 0, data: result });
-  } catch (err) {
-    res.json({ code: 1, message: err.message });
-  }
-});
+  const result = await customerService.handleMessage(+shopId, userId, message, { orderInfo });
+  res.json({ code: 0, data: result });
+}));
 
 // 消息记录列表
 router.get('/customer/messages', (req, res) => {
@@ -145,44 +142,32 @@ router.get('/analytics/stock', (req, res) => {
 });
 
 // 手动触发 AI 洞察
-router.post('/analytics/ai-insight', async (req, res) => {
+router.post('/analytics/ai-insight', asyncHandler(async (req, res) => {
   const { shopId, date } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    const insight = await analyticsService.generateAiInsight(+shopId, date);
-    res.json({ code: 0, data: { insight } });
-  } catch (err) {
-    res.json({ code: 1, message: err.message });
-  }
-});
+  const insight = await analyticsService.generateAiInsight(+shopId, date);
+  res.json({ code: 0, data: { insight } });
+}));
 
 // 手动触发日报
-router.post('/report/daily', async (req, res) => {
+router.post('/report/daily', asyncHandler(async (req, res) => {
   const { shopId } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    const shop = shopService.getShop(+shopId);
-    if (!shop) return res.json({ code: 1, message: '店铺不存在' });
-    const result = await analyticsService.sendDailyReport(+shopId, shop.name);
-    res.json({ code: 0, data: result, message: '日报已推送' });
-  } catch (err) {
-    res.json({ code: 1, message: err.message });
-  }
-});
+  const shop = shopService.getShop(+shopId);
+  if (!shop) return res.json({ code: 1, message: '店铺不存在' });
+  const result = await analyticsService.sendDailyReport(+shopId, shop.name);
+  res.json({ code: 0, data: result, message: '日报已推送' });
+}));
 
 // 手动触发周报
-router.post('/report/weekly', async (req, res) => {
+router.post('/report/weekly', asyncHandler(async (req, res) => {
   const { shopId } = req.body;
   if (!shopId) return res.json({ code: 1, message: '请传入 shopId' });
-  try {
-    const shop = shopService.getShop(+shopId);
-    if (!shop) return res.json({ code: 1, message: '店铺不存在' });
-    await analyticsService.sendWeeklyReport(+shopId, shop.name);
-    res.json({ code: 0, message: '周报已推送' });
-  } catch (err) {
-    res.json({ code: 1, message: err.message });
-  }
-});
+  const shop = shopService.getShop(+shopId);
+  if (!shop) return res.json({ code: 1, message: '店铺不存在' });
+  await analyticsService.sendWeeklyReport(+shopId, shop.name);
+  res.json({ code: 0, message: '周报已推送' });
+}));
 
 // DeepSeek 调用统计
 router.get('/analytics/ai-stats', (req, res) => {

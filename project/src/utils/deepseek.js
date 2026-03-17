@@ -11,6 +11,12 @@ const axios = require('axios');
 const config = require('../config');
 const logger = require('./logger');
 const db = require('./db');
+// 懒加载 monitor，避免循环依赖
+let monitor = null;
+function getMonitor() {
+  if (!monitor) monitor = require('./monitor');
+  return monitor;
+}
 
 const client = axios.create({
   baseURL: config.deepseek.apiUrl,
@@ -49,7 +55,14 @@ function isOverLimit() {
 async function callApi(model, messages, maxTokens = 500) {
   if (isOverLimit()) {
     logger.warn(`[DeepSeek] 今日调用已达上限 ${config.deepseek.dailyLimit}`);
+    getMonitor().aiLimitWarning(getCallCount(), config.deepseek.dailyLimit).catch(() => {});
     throw new Error('AI 今日调用次数已达上限');
+  }
+  // 接近上限（80%）时预警
+  const count = getCallCount();
+  const limit = config.deepseek.dailyLimit;
+  if (count / limit >= 0.8) {
+    getMonitor().aiLimitWarning(count, limit).catch(() => {});
   }
   try {
     const res = await client.post('/chat/completions', { model, messages, max_tokens: maxTokens });
@@ -58,6 +71,7 @@ async function callApi(model, messages, maxTokens = 500) {
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.message;
     logger.error(`[DeepSeek] 调用失败: ${msg}`);
+    getMonitor().apiError('DeepSeek', msg, err.response?.status).catch(() => {});
     throw new Error(`AI 服务异常: ${msg}`);
   }
 }

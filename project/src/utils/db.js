@@ -82,6 +82,24 @@ function initDb() {
     }
   }
 
+  // 迁移：image_url 字段
+  const goodsCols = db.prepare('PRAGMA table_info(goods)').all().map(c => c.name);
+  if (!goodsCols.includes('image_url')) {
+    db.exec('ALTER TABLE goods ADD COLUMN image_url TEXT');
+  }
+
+  // 性能索引
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_shop_status         ON orders(shop_id, status);
+    CREATE INDEX IF NOT EXISTS idx_orders_shop_created        ON orders(shop_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_shop_status_created ON orders(shop_id, status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_goods_shop_status          ON goods(shop_id, status);
+    CREATE INDEX IF NOT EXISTS idx_goods_shop_name            ON goods(shop_id, goods_name);
+    CREATE INDEX IF NOT EXISTS idx_goods_shop_stock           ON goods(shop_id, stock);
+    CREATE INDEX IF NOT EXISTS idx_cs_shop_created            ON customer_messages(shop_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_cs_shop_type               ON customer_messages(shop_id, reply_type);
+  `);
+
   console.log('Database initialized.');
 }
 
